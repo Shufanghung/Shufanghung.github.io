@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>手勢識別應用</title>
+    <style>
+            font-family: Arial, sans-serif;
+            background: linear-gradient(135deg, #74b9ff, #0984e3);
+            margin: 0;
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+
+        h1 {
+            text-align: center;
+            color: #2d3436;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+        }
+
+        .controls {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        button {
+            padding: 15px 30px;
+            font-size: 16px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            margin: 0 10px;
+            font-weight: bold;
+        }
+
+        .start-btn {
+            background: #00b894;
+            color: white;
+        }
+
+        .start-btn:hover {
+            background: #00a085;
+        }
+
+        .stop-btn {
+            background: #e17055;
+            color: white;
+        }
+
+        .stop-btn:hover {
+            background: #d63031;
+        }
+
+        .main-content {
+            display: flex;
+            gap: 30px;
+            align-items: flex-start;
+        }
+
+        #webcam-container {
+            flex: 1;
+            text-align: center;
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            min-height: 350px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #webcam-container canvas {
+            border-radius: 10px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.3);
+            width: 320px;
+            height: 320px;
+        }
+
+        .predictions {
+            flex: 1;
+            min-width: 300px;
+        }
+
+        .predictions h3 {
+            color: #2d3436;
+            margin-bottom: 20px;
+            font-size: 1.3em;
+        }
+
+        .prediction-item {
+            background: #f8f9fa;
+            margin-bottom: 15px;
+            border-radius: 8px;
+            padding: 15px;
+            border-left: 4px solid #ddd;
+        }
+
+        .prediction-item.rank-1 {
+            border-left-color: #e74c3c;
+            background: #ffeaa7;
+        }
+
+        .prediction-item.rank-2 {
+            border-left-color: #f39c12;
+            background: #fdcb6e;
+        }
+
+        .prediction-name {
+            font-weight: bold;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        .prediction-bar {
+            background: #e0e0e0;
+            border-radius: 10px;
+            height: 25px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .prediction-fill {
+            height: 100%;
+            border-radius: 10px;
+            transition: width 0.5s ease;
+            position: relative;
+        }
+
+        .rank-1 .prediction-fill {
+            background: linear-gradient(90deg, #e74c3c, #c0392b);
+        }
+
+        .rank-2 .prediction-fill {
+            background: linear-gradient(90deg, #f39c12, #d68910);
+        }
+
+        .rank-other .prediction-fill {
+            background: linear-gradient(90deg, #7f8c8d, #95a5a6);
+        }
+
+        .prediction-percent {
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: white;
+            font-weight: bold;
+            font-size: 12px;
+        }
+
+        .status {
+            text-align: center;
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            font-weight: bold;
+        }
+
+        .status.ready {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status.stopped {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        @media (max-width: 768px) {
+            .main-content {
+                flex-direction: column;
+            }
+            
+            .container {
+                padding: 20px;
+            }
+            
+            #webcam-container canvas {
+                width: 280px;
+                height: 280px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🤖 手勢識別</h1>
+        
+        <div class="controls">
+            <button class="start-btn" onclick="init()">開始識別</button>
+            <button class="stop-btn" onclick="stopCamera()">停止攝影機</button>
+        </div>
+
+        <div class="main-content">
+            <div id="webcam-container">
+                <div style="color: #666;">
+                    <p>📷 點擊「開始識別」啟動攝影機</p>
+                </div>
+            </div>
+            
+            <div class="predictions">
+                <h3>📊 識別結果</h3>
+                <div id="label-container"></div>
+            </div>
+        </div>
+
+        <div id="status" class="status stopped">
+            攝影機已停止
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+    <script>
+        const URL = "https://teachablemachine.withgoogle.com/models/fFcFdh6Wc/";
+        let model, webcam, labelContainer, maxPredictions;
+        let isRunning = false;
+
+        async function init() {
+            if (isRunning) return;
+            
+            try {
+                document.getElementById("status").textContent = "正在載入模型...";
+                document.getElementById("status").className = "status";
+
+                const modelURL = URL + "model.json";
+                const metadataURL = URL + "metadata.json";
+
+                model = await tmImage.load(modelURL, metadataURL);
+                maxPredictions = model.getTotalClasses();
+
+                const flip = true;
+                webcam = new tmImage.Webcam(320, 320, flip);
+                await webcam.setup();
+                await webcam.play();
+                isRunning = true;
+
+                document.getElementById("webcam-container").innerHTML = "";
+                document.getElementById("webcam-container").appendChild(webcam.canvas);
+
+                labelContainer = document.getElementById("label-container");
+                labelContainer.innerHTML = "";
+                
+                for (let i = 0; i < maxPredictions; i++) {
+                    const div = document.createElement("div");
+                    div.className = "prediction-item";
+                    div.innerHTML = `
+                        <div class="prediction-name" id="name-${i}">載入中...</div>
+                        <div class="prediction-bar">
+                            <div class="prediction-fill rank-other" id="fill-${i}">
+                                <div class="prediction-percent" id="percent-${i}">0%</div>
+                            </div>
+                        </div>
+                    `;
+                    labelContainer.appendChild(div);
+                }
+
+                document.getElementById("status").textContent = "攝影機已啟動，正在識別...";
+                document.getElementById("status").className = "status ready";
+
+                window.requestAnimationFrame(loop);
+
+            } catch (error) {
+                console.error("啟動失敗:", error);
+                document.getElementById("status").textContent = "啟動失敗，請重試";
+                document.getElementById("status").className = "status stopped";
+            }
+        }
+
+        async function loop() {
+            if (!isRunning) return;
+            webcam.update();
+            await predict();
+            window.requestAnimationFrame(loop);
+        }
+
+        async function predict() {
+            const prediction = await model.predict(webcam.canvas);
+            
+            // 排序預測結果
+            const sorted = prediction.sort((a, b) => b.probability - a.probability);
+            
+            for (let i = 0; i < maxPredictions; i++) {
+                const pred = sorted[i];
+                const percent = (pred.probability * 100).toFixed(1);
+                
+                document.getElementById(`name-${i}`).textContent = pred.className;
+                document.getElementById(`percent-${i}`).textContent = percent + "%";
+                document.getElementById(`fill-${i}`).style.width = percent + "%";
+                
+                // 設定顏色和樣式
+                const item = labelContainer.children[i];
+                const fill = document.getElementById(`fill-${i}`);
+                
+                if (i === 0) {
+                    item.className = "prediction-item rank-1";
+                    fill.className = "prediction-fill rank-1";
+                } else if (i === 1) {
+                    item.className = "prediction-item rank-2";
+                    fill.className = "prediction-fill rank-2";
+                } else {
+                    item.className = "prediction-item";
+                    fill.className = "prediction-fill rank-other";
+                }
+            }
+        }
+
+        function stopCamera() {
+            if (webcam) {
+                webcam.stop();
+                isRunning = false;
+                
+                document.getElementById("webcam-container").innerHTML = `
+                    <div style="color: #666;">
+                        <p>📷 攝影機已停止</p>
+                        <p style="font-size: 14px;">點擊「開始識別」重新啟動</p>
+                    </div>
+                `;
+                
+                document.getElementById("label-container").innerHTML = "";
+                document.getElementById("status").textContent = "攝影機已停止";
+                document.getElementById("status").className = "status stopped";
+            }
+        }
+
+        // 頁面關閉時停止攝影機
+        window.addEventListener('beforeunload', function() {
+            if (webcam) {
+                webcam.stop();
+            }
+        });
+    </script>
+</body>
+</html>
